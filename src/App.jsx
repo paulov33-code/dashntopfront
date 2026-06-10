@@ -5,6 +5,7 @@ import * as echarts from 'echarts';
 // ==========================================
 // 1. CAPA DE CONFIGURACIÓN Y DATOS (API)
 // ==========================================
+// Cambiado a la IP de tu servidor para permitir el monitoreo móvil multi-dispositivo
 const API_BASE_URL = "http://195.0.5.240:8000/api/v1";
 
 const api = {
@@ -22,6 +23,12 @@ const api = {
     const res = await fetch(`${API_BASE_URL}/hosts/${ip}/top-applications`);
     if (!res.ok) throw new Error("Error en US-003");
     return res.json();
+  },
+  // NUEVO ENDPOINT: Top Consumidores de la Red Completa
+  fetchTopConsumers: async (ifid = 4, limit = 5) => {
+    const res = await fetch(`${API_BASE_URL}/traffic/top-consumers?ifid=${ifid}&limit=${limit}`);
+    if (!res.ok) throw new Error("Error cargando Consumidores Globales");
+    return res.json();
   }
 };
 
@@ -38,29 +45,34 @@ const formatBytes = (bytes) => {
 // 2. COMPONENTE PRINCIPAL UNIFICADO
 // ==========================================
 export default function App() {
-  // Estados US-001
+  // Estados Globales (Vista B)
   const [hosts, setHosts] = useState([]);
   const [metrics, setMetrics] = useState({});
+  const [topConsumers, setTopConsumers] = useState([]); // Estado para el nuevo gráfico
   const [search, setSearch] = useState("");
   const [loadingList, setLoadingList] = useState(true);
   const [error, setError] = useState(null);
 
-  // Estados US-002 y US-003
+  // Estados de Inspección Host (Vista A)
   const [selectedHostIp, setSelectedHostIp] = useState(null);
   const [hostDetail, setHostDetail] = useState(null);
   const [hostApps, setHostApps] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
-  // Polling de inventario general (US-001)
+  // Polling unificado del inventario y consumidores globales (Cada 5 segundos)
   useEffect(() => {
     const loadNocData = () => {
-      api.fetchHosts(4)
-        .then(data => {
-          setHosts(data.hosts || []);
-          setMetrics(data.metrics || {});
+      Promise.all([
+        api.fetchHosts(4),
+        api.fetchTopConsumers(4, 5)
+      ])
+        .then(([hostsData, consumersData]) => {
+          setHosts(hostsData.hosts || []);
+          setMetrics(hostsData.metrics || {});
+          setTopConsumers(consumersData || []);
           setError(null);
         })
-        .catch(() => setError("Error de conexión con el Backend de Python (¿Está encendido?)."))
+        .catch(() => setError("Error de conexión con el Backend de Python (Verifica IP/Puerto)."))
         .finally(() => setLoadingList(false));
     };
 
@@ -69,7 +81,7 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Carga de detalle profundo al hacer Clic (US-002 y US-003)
+  // Carga de detalle profundo al inspeccionar un dispositivo
   useEffect(() => {
     if (!selectedHostIp) return;
     setLoadingDetail(true);
@@ -89,7 +101,7 @@ export default function App() {
       .finally(() => setLoadingDetail(false));
   }, [selectedHostIp]);
 
-  // Filtrado en tiempo real
+  // Filtrado de la tabla maestra
   const filteredHosts = hosts.filter(host => 
     host.ip?.toLowerCase().includes(search.toLowerCase()) ||
     host.hostname?.toLowerCase().includes(search.toLowerCase())
@@ -172,18 +184,17 @@ export default function App() {
                 </div>
               </div>
 
-              {/* US-003: Gráfico de Tráfico de Aplicaciones con Apache ECharts */}
+              {/* US-003: Gráfico de Tráfico de Aplicaciones Local */}
               <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '24px' }}>
                 <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#cbd5e1', textTransform: 'uppercase', margin: '0 0 16px 0' }}>
                   Distribución de Aplicaciones L7
                 </h3>
-                
                 {(!hostApps || !hostApps.applications || hostApps.applications.length === 0) ? (
                   <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '40px 0' }}>
                     Sin telemetría de flujos de aplicación acumulados.
                   </p>
                 ) : (
-                  <EChartsPieWrapper applications={hostApps.applications} />
+                  <EChartsPieWrapper applications={hostApps.applications} nameKey="name" valueKey="bytes" seriesName="Consumo por Aplicación" />
                 )}
               </div>
 
@@ -214,6 +225,20 @@ export default function App() {
               <div><p style={{ fontSize: '12px', color: '#94a3b8', margin: 0, textTransform: 'uppercase' }}>Desconocidos</p><p style={{ fontSize: '24px', fontWeight: 'bold', margin: '4px 0 0 0', color: '#f43f5e' }}>{metrics.hosts_desconocidos || 0}</p></div>
               <ShieldAlert className="h-6 w-6 text-rose-400" />
             </div>
+          </div>
+
+          {/* NUEVA SECCIÓN: GRÁFICO GLOBAL DE TOP CONSUMIDORES (POSICIÓN SOLICITADA) */}
+          <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '24px' }}>
+            <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#cbd5e1', textTransform: 'uppercase', margin: '0 0 16px 0', letterSpacing: '0.05em' }}>
+              Distribución de Tráfico: Top 5 Consumidores Globales LAN
+            </h3>
+            {topConsumers.length === 0 ? (
+              <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '40px 0' }}>
+                Calculando matriz de consumo de datagramas...
+              </p>
+            ) : (
+              <EChartsPieWrapper applications={topConsumers} nameKey="hostname" valueKey="total_bytes" seriesName="Consumo por Dispositivo" />
+            )}
           </div>
 
           {/* Buscador */}
@@ -291,21 +316,22 @@ export default function App() {
   );
 }
 
-// Sub-componente autónomo para aislar la lógica del Canvas de ECharts
-function EChartsPieWrapper({ applications }) {
+// ==========================================
+// 3. REUTILIZABLE DE APACHE ECHARTS (POLIMÓRFICO)
+// ==========================================
+function EChartsPieWrapper({ applications, nameKey = 'name', valueKey = 'bytes', seriesName = 'Consumo' }) {
   const chartRef = useRef(null);
 
   useEffect(() => {
     if (!chartRef.current) return;
 
-    // Inicialización 100% limpia mediante importación directa de ES Modules (Seguro para Vite)
     const myChart = echarts.init(chartRef.current);
 
-    // Mapeamos los datos reales del JSON usando app.name de forma segura
-    const chartData = (applications || []).map(app => {
-      const bytesInGB = parseFloat((app.bytes / (1024 * 1024 * 1024)).toFixed(3));
+    // Mapeo adaptivo dinámico convirtiendo a Gigabytes (Soporta bytes l7 y total_bytes)
+    const chartData = (applications || []).map(item => {
+      const bytesInGB = parseFloat((item[valueKey] / (1024 * 1024 * 1024)).toFixed(2));
       return {
-        name: app.name || 'Desconocida',
+        name: item[nameKey] || 'Desconocido',
         value: bytesInGB
       };
     });
@@ -329,18 +355,18 @@ function EChartsPieWrapper({ applications }) {
         bottom: '0%',
         left: 'center',
         textStyle: { color: '#cbd5e1', fontSize: 11 },
-        itemGap: 10,
+        itemGap: 14,
         type: 'scroll'
       },
       series: [
         {
-          name: 'Consumo por Aplicación',
+          name: seriesName,
           type: 'pie',
-          radius: ['40%', '70%'],
+          radius: ['45%', '72%'],
           center: ['50%', '42%'], 
           avoidLabelOverlap: false,
           itemStyle: {
-            borderRadius: 8,
+            borderRadius: 6,
             borderColor: '#1e293b', 
             borderWidth: 2
           },
@@ -351,7 +377,7 @@ function EChartsPieWrapper({ applications }) {
           emphasis: {
             label: {
               show: true,
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: 'bold',
               color: '#f8fafc',
               formatter: '{b}\n{c} GB'
@@ -376,17 +402,7 @@ function EChartsPieWrapper({ applications }) {
       window.removeEventListener('resize', handleResize);
       myChart.dispose();
     };
-  }, [applications]);
+  }, [applications, nameKey, valueKey, seriesName]);
 
-  return (
-    <div 
-      ref={chartRef} 
-      style={{ 
-        width: '100%', 
-        height: '320px', 
-        position: 'relative',
-        zIndex: 10
-      }} 
-    />
-  );
+  return <div ref={chartRef} style={{ width: '100%', height: '280px', position: 'relative', zIndex: 10 }} />;
 }
