@@ -129,77 +129,112 @@ export default function App() {
         </div>
       )}
 
-      {/* ========================================================== */}
-      {/* VISTA A: DETALLE INDIVIDUAL DEL HOST (US-002 + US-003)      */}
-      {/* ========================================================== */}
-      {selectedHostIp ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {loadingDetail || !hostDetail || !hostApps ? (
-            <div style={{ textAlign: 'center', padding: '48px', color: '#94a3b8', backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px' }}>
-              <RefreshCw className="h-6 w-6 animate-spin mx-auto mb-2 text-emerald-400" />
-              Abriendo túnel de inspección profunda L7...
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
-              
-              {/* US-002: Ficha Técnica */}
-              <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '24px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '16px', marginBottom: '16px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <Laptop className="h-6 w-6 text-emerald-400" />
-                    <div>
-                      <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0 }}>{hostDetail.hostname || 'Unknown Host'}</h2>
-                      <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>IP: {hostDetail.ip}</p>
+        {/* ========================================================== */}
+        {/* VISTA A: DETALLE INDIVIDUAL DEL HOST (US-002 + US-003)      */}
+        {/* ========================================================== */}
+        {selectedHostIp ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {loadingDetail || !hostDetail || !hostApps ? (
+              <div style={{ textAlign: 'center', padding: '48px', color: '#94a3b8', backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px' }}>
+                <RefreshCw className="h-6 w-6 animate-spin mx-auto mb-2 text-emerald-400" />
+                Abriendo túnel de inspección profunda L7...
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+                
+                {/* US-002: Ficha Técnica */}
+                <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #334155', paddingBottom: '16px', marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <Laptop className="h-6 w-6 text-emerald-400" />
+                      <div>
+                        <h2 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0 }}>{hostDetail.hostname || 'Unknown Host'}</h2>
+                        <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>IP: {hostDetail.ip}</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => { setSelectedHostIp(null); setHostDetail(null); setHostApps(null); }}
+                      style={{ backgroundColor: '#0f172a', border: '1px solid #475569', color: '#cbd5e1', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" /> Volver al NOC
+                    </button>
+                  </div>
+                  
+                  {/* Datos Base del Dispositivo */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '13px', marginBottom: '16px' }}>
+                    <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.4)', padding: '12px', borderRadius: '6px', border: '1px solid rgba(51, 65, 85, 0.5)' }}>
+                      <span style={{ color: '#94a3b8', display: 'block', fontSize: '11px', marginBottom: '4px' }}>DIRECCIÓN MAC</span>
+                      <span style={{ fontWeight: 'bold', fontFamily: 'monospace' }}>{hostDetail.mac || 'N/A'}</span>
+                    </div>
+                    <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.4)', padding: '12px', borderRadius: '6px', border: '1px solid rgba(51, 65, 85, 0.5)' }}>
+                      <span style={{ color: '#94a3b8', display: 'block', fontSize: '11px', marginBottom: '4px' }}>FABRICANTE VENDOR</span>
+                      <span style={{ fontWeight: 'bold' }}>{hostDetail.vendor || 'OEM Generic'}</span>
+                    </div>
+                    <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.4)', padding: '12px', borderRadius: '6px', border: '1px solid rgba(51, 65, 85, 0.5)' }}>
+                      <span style={{ color: '#94a3b8', display: 'block', fontSize: '11px', marginBottom: '4px' }}>SISTEMA OPERATIVO</span>
+                      <span style={{ fontWeight: 'bold' }}>{hostDetail.os !== "None" ? hostDetail.os : "No Detectado"}</span>
+                    </div>
+                    <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.4)', padding: '12px', borderRadius: '6px', border: '1px solid rgba(51, 65, 85, 0.5)' }}>
+                      <span style={{ color: '#94a3b8', display: 'block', fontSize: '11px', marginBottom: '4px' }}>ESTADO EN RED</span>
+                      <span style={{ color: hostDetail.is_online ? '#34d399' : '#64748b', fontWeight: 'bold' }}>
+                        {hostDetail.is_online ? '● INTERFAZ ACTIVA' : '○ DESCONECTADO'}
+                      </span>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => { setSelectedHostIp(null); setHostDetail(null); setHostApps(null); }}
-                    style={{ backgroundColor: '#0f172a', border: '1px solid #475569', color: '#cbd5e1', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5" /> Volver al NOC
-                  </button>
-                </div>
-                
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '13px' }}>
-                  <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.4)', padding: '12px', borderRadius: '6px', border: '1px solid rgba(51, 65, 85, 0.5)' }}>
-                    <span style={{ color: '#94a3b8', display: 'block', fontSize: '11px', marginBottom: '4px' }}>DIRECCIÓN MAC</span>
-                    <span style={{ fontWeight: 'bold' }}>{hostDetail.mac || 'N/A'}</span>
-                  </div>
-                  <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.4)', padding: '12px', borderRadius: '6px', border: '1px solid rgba(51, 65, 85, 0.5)' }}>
-                    <span style={{ color: '#94a3b8', display: 'block', fontSize: '11px', marginBottom: '4px' }}>FABRICANTE VENDOR</span>
-                    <span style={{ fontWeight: 'bold' }}>{hostDetail.vendor || 'OEM Generic'}</span>
-                  </div>
-                  <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.4)', padding: '12px', borderRadius: '6px', border: '1px solid rgba(51, 65, 85, 0.5)' }}>
-                    <span style={{ color: '#94a3b8', display: 'block', fontSize: '11px', marginBottom: '4px' }}>SISTEMA OPERATIVO</span>
-                    <span style={{ fontWeight: 'bold' }}>{hostDetail.os !== "None" ? hostDetail.os : "No Detectado"}</span>
-                  </div>
-                  <div style={{ backgroundColor: 'rgba(15, 23, 42, 0.4)', padding: '12px', borderRadius: '6px', border: '1px solid rgba(51, 65, 85, 0.5)' }}>
-                    <span style={{ color: '#94a3b8', display: 'block', fontSize: '11px', marginBottom: '4px' }}>ESTADO EN RED</span>
-                    <span style={{ color: hostDetail.is_online ? '#34d399' : '#64748b', fontWeight: 'bold' }}>
-                      {hostDetail.is_online ? '● INTERFAZ ACTIVA' : '○ DESCONECTADO'}
-                    </span>
-                  </div>
-                </div>
-              </div>
 
-              {/* US-003: Gráfico de Tráfico de Aplicaciones Local */}
-              <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '24px' }}>
-                <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#cbd5e1', textTransform: 'uppercase', margin: '0 0 16px 0' }}>
-                  Distribución de Aplicaciones L7
-                </h3>
-                {(!hostApps || !hostApps.applications || hostApps.applications.length === 0) ? (
-                  <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '40px 0' }}>
-                    Sin telemetría de flujos de aplicación acumulados.
-                  </p>
-                ) : (
-                  <EChartsPieWrapper dataList={hostApps.applications} nameKey="name" valueKey="bytes" seriesName="Consumo por Aplicación" />
-                )}
-              </div>
+                  {/* NUEVO SUBPANEL: Telemetría de Tráfico (Paquetes y Bytes) */}
+                  <div style={{ borderTop: '1px dashed #334155', paddingTop: '16px' }}>
+                    <h4 style={{ fontSize: '11px', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', margin: '0 0 12px 0', letterSpacing: '0.05em' }}>
+                      Estadísticas de Flujo L2/L3
+                    </h4>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '13px' }}>
+                      <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.05)', padding: '12px', borderRadius: '6px', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                        <span style={{ color: '#60a5fa', display: 'block', fontSize: '10px', fontWeight: 'bold', marginBottom: '6px' }}>⬆ TRÁFICO ENVIADO (TX)</span>
+                        <div style={{ marginBottom: '4px' }}>
+                          <span style={{ color: '#94a3b8', fontSize: '11px' }}>Volumen: </span>
+                          <span style={{ fontWeight: 'bold', fontFamily: 'monospace' }}>{formatBytes(hostDetail.bytes_sent)}</span>
+                        </div>
+                        <div>
+                          <span style={{ color: '#94a3b8', fontSize: '11px' }}>Paquetes: </span>
+                          <span style={{ fontWeight: 'bold', fontFamily: 'monospace' }}>{(hostDetail.packets_sent || 0).toLocaleString()}</span>
+                        </div>
+                      </div>
 
-            </div>
-          )}
-        </div>
-      ) : (
+                      <div style={{ backgroundColor: 'rgba(52, 211, 153, 0.05)', padding: '12px', borderRadius: '6px', border: '1px solid rgba(52, 211, 153, 0.2)' }}>
+                        <span style={{ color: '#34d399', display: 'block', fontSize: '10px', fontWeight: 'bold', marginBottom: '6px' }}>⬇ TRÁFICO RECIBIDO (RX)</span>
+                        <div style={{ marginBottom: '4px' }}>
+                          <span style={{ color: '#94a3b8', fontSize: '11px' }}>Volumen: </span>
+                          <span style={{ fontWeight: 'bold', fontFamily: 'monospace' }}>{formatBytes(hostDetail.bytes_rcvd)}</span>
+                        </div>
+                        <div>
+                          <span style={{ color: '#94a3b8', fontSize: '11px' }}>Paquetes: </span>
+                          <span style={{ fontWeight: 'bold', fontFamily: 'monospace' }}>{(hostDetail.packets_rcvd || 0).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* US-003: Gráfico de Tráfico de Aplicaciones Local */}
+                <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '24px' }}>
+                  <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#cbd5e1', textTransform: 'uppercase', margin: '0 0 16px 0' }}>
+                    Distribución de Aplicaciones L7
+                  </h3>
+                  {(!hostApps || !hostApps.applications || hostApps.applications.length === 0) ? (
+                    <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '40px 0' }}>
+                      Sin telemetría de flujos de aplicación acumulados.
+                    </p>
+                  ) : (
+                    <EChartsPieWrapper dataList={hostApps.applications} nameKey="name" valueKey="bytes" seriesName="Consumo por Aplicación" />
+                  )}
+                </div>
+
+              </div>
+            )}
+          </div>
+        ) : (
+      
         /* ========================================================== */
         /* VISTA B: DASHBOARD GENERAL DEL NOC (US-001)                */
         /* ========================================================== */
