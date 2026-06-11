@@ -5,7 +5,6 @@ import * as echarts from 'echarts';
 // ==========================================
 // 1. CAPA DE CONFIGURACIÓN Y DATOS (API)
 // ==========================================
-// Cambiado a la IP de tu servidor para permitir el monitoreo móvil multi-dispositivo
 const API_BASE_URL = "http://195.0.5.240:8000/api/v1";
 
 const api = {
@@ -24,8 +23,7 @@ const api = {
     if (!res.ok) throw new Error("Error en US-003");
     return res.json();
   },
-  // NUEVO ENDPOINT: Top Consumidores de la Red Completa
-  fetchTopConsumers: async (ifid = 4, limit = 5) => {
+  fetchTopConsumers: async (ifid = 4, limit = 10) => {
     const res = await fetch(`${API_BASE_URL}/traffic/top-consumers?ifid=${ifid}&limit=${limit}`);
     if (!res.ok) throw new Error("Error cargando Consumidores Globales");
     return res.json();
@@ -48,7 +46,7 @@ export default function App() {
   // Estados Globales (Vista B)
   const [hosts, setHosts] = useState([]);
   const [metrics, setMetrics] = useState({});
-  const [topConsumers, setTopConsumers] = useState([]); // Estado para el nuevo gráfico
+  const [topConsumers, setTopConsumers] = useState([]);
   const [search, setSearch] = useState("");
   const [loadingList, setLoadingList] = useState(true);
   const [error, setError] = useState(null);
@@ -59,12 +57,12 @@ export default function App() {
   const [hostApps, setHostApps] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
-  // Polling unificado del inventario y consumidores globales (Cada 5 segundos)
+  // Polling unificado (Cada 5 segundos)
   useEffect(() => {
     const loadNocData = () => {
       Promise.all([
         api.fetchHosts(4),
-        api.fetchTopConsumers(4, 5)
+        api.fetchTopConsumers(4, 10)
       ])
         .then(([hostsData, consumersData]) => {
           setHosts(hostsData.hosts || []);
@@ -77,7 +75,7 @@ export default function App() {
     };
 
     loadNocData();
-    const interval = setInterval(loadNocData, 5000);
+    const interval = setInterval(loadNocData, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -194,7 +192,7 @@ export default function App() {
                     Sin telemetría de flujos de aplicación acumulados.
                   </p>
                 ) : (
-                  <EChartsPieWrapper applications={hostApps.applications} nameKey="name" valueKey="bytes" seriesName="Consumo por Aplicación" />
+                  <EChartsPieWrapper dataList={hostApps.applications} nameKey="name" valueKey="bytes" seriesName="Consumo por Aplicación" />
                 )}
               </div>
 
@@ -227,17 +225,24 @@ export default function App() {
             </div>
           </div>
 
-          {/* NUEVA SECCIÓN: GRÁFICO GLOBAL DE TOP CONSUMIDORES (POSICIÓN SOLICITADA) */}
+          {/* GRÁFICO GLOBAL DE TOP CONSUMIDORES (CON COUPLING DE EVENTO CLICK) */}
           <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '24px' }}>
-            <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#cbd5e1', textTransform: 'uppercase', margin: '0 0 16px 0', letterSpacing: '0.05em' }}>
-              Distribución de Tráfico: Top 5 Consumidores Globales LAN
+            <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#cbd5e1', textTransform: 'uppercase', margin: '0 0 8px 0', letterSpacing: '0.05em' }}>
+              Distribución de Tráfico: Top 10 Consumidores Globales LAN
             </h3>
+            <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 16px 0' }}>💡 Haz clic en cualquier porción o elemento de la leyenda para inspeccionar el dispositivo de forma directa.</p>
             {topConsumers.length === 0 ? (
               <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '40px 0' }}>
                 Calculando matriz de consumo de datagramas...
               </p>
             ) : (
-              <EChartsPieWrapper applications={topConsumers} nameKey="hostname" valueKey="total_bytes" seriesName="Consumo por Dispositivo" />
+              <EChartsPieWrapper 
+                dataList={topConsumers} 
+                nameKey="hostname" 
+                valueKey="total_bytes" 
+                seriesName="Consumo por Dispositivo" 
+                onSelectHost={setSelectedHostIp} 
+              />
             )}
           </div>
 
@@ -317,9 +322,9 @@ export default function App() {
 }
 
 // ==========================================
-// 3. REUTILIZABLE DE APACHE ECHARTS (POLIMÓRFICO)
+// 3. REUTILIZABLE DE APACHE ECHARTS (ADAPTATIVO)
 // ==========================================
-function EChartsPieWrapper({ applications, nameKey = 'name', valueKey = 'bytes', seriesName = 'Consumo' }) {
+function EChartsPieWrapper({ dataList, nameKey = 'name', valueKey = 'bytes', seriesName = 'Consumo', onSelectHost }) {
   const chartRef = useRef(null);
 
   useEffect(() => {
@@ -327,12 +332,14 @@ function EChartsPieWrapper({ applications, nameKey = 'name', valueKey = 'bytes',
 
     const myChart = echarts.init(chartRef.current);
 
-    // Mapeo adaptivo dinámico convirtiendo a Gigabytes (Soporta bytes l7 y total_bytes)
-    const chartData = (applications || []).map(item => {
+    // Mapeamos los datos inyectando la IP en la estructura interna de ECharts para poder recuperarla en el Click
+    const chartData = (dataList || []).map(item => {
       const bytesInGB = parseFloat((item[valueKey] / (1024 * 1024 * 1024)).toFixed(2));
       return {
         name: item[nameKey] || 'Desconocido',
-        value: bytesInGB
+        value: bytesInGB,
+        // Almacenamos la IP de manera segura dentro de las propiedades extendidas del nodo de datos
+        hostIp: item.ip || null 
       };
     });
 
@@ -393,6 +400,16 @@ function EChartsPieWrapper({ applications, nameKey = 'name', valueKey = 'bytes',
 
     myChart.setOption(option);
 
+    // NUEVO EVENTO: Interceptor de Clics sobre los sectores de la dona
+    if (onSelectHost) {
+      myChart.on('click', function (params) {
+        // Accedemos a la propiedad extendida hostIp de nuestro set original
+        if (params.data && params.data.hostIp) {
+          onSelectHost(params.data.hostIp);
+        }
+      });
+    }
+
     const handleResize = () => {
       if (myChart) myChart.resize();
     };
@@ -400,9 +417,22 @@ function EChartsPieWrapper({ applications, nameKey = 'name', valueKey = 'bytes',
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      // Desvinculamos el evento para evitar fugas de memoria (memory leaks) antes de destruir la instancia
+      if (onSelectHost) myChart.off('click');
       myChart.dispose();
     };
-  }, [applications, nameKey, valueKey, seriesName]);
+  }, [dataList, nameKey, valueKey, seriesName, onSelectHost]);
 
-  return <div ref={chartRef} style={{ width: '100%', height: '280px', position: 'relative', zIndex: 10 }} />;
+  return (
+    <div 
+      ref={chartRef} 
+      style={{ 
+        width: '100%', 
+        height: '280px', 
+        position: 'relative', 
+        zIndex: 10,
+        cursor: onSelectHost ? 'pointer' : 'default' // Cambia el cursor a "mano" si es clickeable
+      }} 
+    />
+  );
 }
