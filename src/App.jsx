@@ -27,6 +27,14 @@ const api = {
     const res = await fetch(`${API_BASE_URL}/traffic/top-consumers?ifid=${ifid}&limit=${limit}`);
     if (!res.ok) throw new Error("Error cargando Consumidores Globales");
     return res.json();
+  },
+  fetchAppsDns: async (ip) => {
+    // URL modificada con el query param correcto (?ip=...) según tu curl previo
+    const res = await fetch(`http://localhost:8000/api/dns-stats?ip=${ip}`, {
+      headers: { 'accept': 'application/json' }
+    });
+    if (!res.ok) throw new Error("Error en US-003");
+    return res.json();
   }
 };
 
@@ -113,7 +121,7 @@ export default function App() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <Network className="h-8 w-8 text-emerald-400 animate-pulse" />
           <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: 0 }}>ntopng Custom NOC</h1>
+            <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: 0 }}>Corralon a b c</h1>
             <p style={{ fontSize: '14px', color: '#94a3b8', margin: '4px 0 0 0' }}>Monitoreo e Inventario de Flujos de Red</p>
           </div>
         </div>
@@ -129,7 +137,7 @@ export default function App() {
         </div>
       )}
 
-        {/* ========================================================== */}
+      {/* ========================================================== */}
       {/* VISTA A: DETALLE INDIVIDUAL DEL HOST (US-002 + US-003)      */}
       {/* ========================================================== */}
       {selectedHostIp ? (
