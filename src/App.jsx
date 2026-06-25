@@ -29,11 +29,18 @@ const api = {
     return res.json();
   },
   fetchAppsDns: async (ip) => {
-    // URL modificada con el query param correcto (?ip=...) según tu curl previo
     const res = await fetch(`http://localhost:8000/api/dns-stats?ip=${ip}`, {
       headers: { 'accept': 'application/json' }
     });
-    if (!res.ok) throw new Error("Error en US-003");
+    if (!res.ok) throw new Error("Error en US-003_DNS");
+    return res.json();
+  },
+  // NUEVO ENDPOINT: Top Receptores Internos
+  fetchTopReceivers: async (timeRange = "now-5h") => {
+    const res = await fetch(`http://localhost:8000/api/top-receptores?time_range=${timeRange}`, {
+      headers: { 'accept': 'application/json' }
+    });
+    if (!res.ok) throw new Error("Error cargando Top Receptores");
     return res.json();
   }
 };
@@ -55,6 +62,7 @@ export default function App() {
   const [hosts, setHosts] = useState([]);
   const [metrics, setMetrics] = useState({});
   const [topConsumers, setTopConsumers] = useState([]);
+  const [topReceivers, setTopReceivers] = useState([]); // Nuevo Estado
   const [search, setSearch] = useState("");
   const [loadingList, setLoadingList] = useState(true);
   const [error, setError] = useState(null);
@@ -64,18 +72,24 @@ export default function App() {
   const [hostDetail, setHostDetail] = useState(null);
   const [hostApps, setHostApps] = useState(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  
+  // Estados para la auditoría DNS
+  const [dnsData, setDnsData] = useState([]);
+  const [loadingDns, setLoadingDns] = useState(false);
 
-  // Polling unificado (Cada 5 segundos)
+  // Polling unificado (Cada 30 segundos)
   useEffect(() => {
     const loadNocData = () => {
       Promise.all([
         api.fetchHosts(4),
-        api.fetchTopConsumers(4, 10)
+        api.fetchTopConsumers(4, 10),
+        api.fetchTopReceivers("now-5h").catch(() => ({ success: false, data: [] })) // Resguardo si el puerto 8000 no responde
       ])
-        .then(([hostsData, consumersData]) => {
+        .then(([hostsData, consumersData, receiversData]) => {
           setHosts(hostsData.hosts || []);
           setMetrics(hostsData.metrics || {});
           setTopConsumers(consumersData || []);
+          setTopReceivers(receiversData.success ? receiversData.data : []);
           setError(null);
         })
         .catch(() => setError("Error de conexión con el Backend de Python (Verifica IP/Puerto)."))
@@ -105,6 +119,34 @@ export default function App() {
         setError("No se pudieron solicitar los datagramas L7 de este dispositivo.");
       })
       .finally(() => setLoadingDetail(false));
+  }, [selectedHostIp]);
+
+  // Efecto independiente para cargar las estadísticas DNS
+  useEffect(() => {
+    if (!selectedHostIp) {
+      setDnsData([]);
+      return;
+    }
+
+    const loadDnsData = async () => {
+      try {
+        setLoadingDns(true);
+        const json = await api.fetchAppsDns(selectedHostIp);
+        if (json.success && json.data) {
+          const sortedData = [...json.data].sort((a, b) => a.conexiones - b.conexiones);
+          setDnsData(sortedData);
+        } else {
+          setDnsData([]);
+        }
+      } catch (err) {
+        console.error("Error cargando auditoría DNS:", err);
+        setDnsData([]); 
+      } finally {
+        setLoadingDns(false);
+      }
+    };
+
+    loadDnsData();
   }, [selectedHostIp]);
 
   // Filtrado de la tabla maestra
@@ -163,7 +205,7 @@ export default function App() {
                       </div>
                     </div>
                     <button 
-                      onClick={() => { setSelectedHostIp(null); setHostDetail(null); setHostApps(null); }}
+                      onClick={() => { setSelectedHostIp(null); setHostDetail(null); setHostApps(null); setDnsData([]); }}
                       style={{ backgroundColor: '#0f172a', border: '1px solid #475569', color: '#cbd5e1', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
                     >
                       <ArrowLeft className="h-3.5 w-3.5" /> Volver al NOC
@@ -240,7 +282,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* NUEVA SECCIÓN: TABLA DETALLADA DE PROTOCOLOS DE APLICACIÓN L7 */}
+              {/* TABLA DETALLADA DE PROTOCOLOS DE APLICACIÓN L7 */}
               <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '24px', marginTop: '8px' }}>
                 <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#cbd5e1', textTransform: 'uppercase', margin: '0 0 16px 0', letterSpacing: '0.05em' }}>
                   Matriz de Protocolos e Intenciones de Tráfico L7
@@ -268,7 +310,6 @@ export default function App() {
                         </tr>
                       ) : (
                         hostApps.applications.map((app, index) => {
-                          // 1. Formateador de segundos a HH:MM:SS
                           const formatDuration = (secs) => {
                             if (!secs) return "00:00:00";
                             const h = String(Math.floor(secs / 3600)).padStart(2, '0');
@@ -277,7 +318,6 @@ export default function App() {
                             return `${h}:${m}:${s}`;
                           };
 
-                          // 2. Cálculo del ratio interno de subida vs descarga
                           const totalBytes = app.bytes || (app.sent_bytes + app.received_bytes) || 1;
                           const txRatio = Math.min(((app.sent_bytes || 0) / totalBytes) * 100, 100);
                           const rxRatio = 100 - txRatio;
@@ -289,41 +329,22 @@ export default function App() {
                               onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(15, 23, 42, 0.2)'}
                               onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                             >
-                              {/* Nombre */}
-                              <td style={{ padding: '12px 16px', fontWeight: 'bold', color: '#e2e8f0' }}>
-                                {app.name}
-                              </td>
-                              {/* Duración */}
-                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#cbd5e1' }}>
-                                {formatDuration(app.duration)}
-                              </td>
-                              {/* Enviado */}
-                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#60a5fa' }}>
-                                {formatBytes(app.sent_bytes)}
-                              </td>
-                              {/* Recibido */}
-                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#34d399' }}>
-                                {formatBytes(app.received_bytes)}
-                              </td>
-                              {/* Barra de Ratio de flujos */}
+                              <td style={{ padding: '12px 16px', fontWeight: 'bold', color: '#e2e8f0' }}>{app.name}</td>
+                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#cbd5e1' }}>{formatDuration(app.duration)}</td>
+                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#60a5fa' }}>{formatBytes(app.sent_bytes)}</td>
+                              <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: '#34d399' }}>{formatBytes(app.received_bytes)}</td>
                               <td style={{ padding: '12px 16px', verticalAlign: 'middle' }}>
                                 <div style={{ display: 'flex', width: '100%', height: '6px', borderRadius: '3px', overflow: 'hidden', backgroundColor: '#334155' }} title={`Subida: ${txRatio.toFixed(1)}% | Descarga: ${rxRatio.toFixed(1)}%`}>
-                                  <div style={{ width: `${txRatio}%`, backgroundColor: '#fb923c' }} /> {/* Naranja para TX */}
-                                  <div style={{ width: `${rxRatio}%`, backgroundColor: '#4ade80' }} /> {/* Verde para RX */}
+                                  <div style={{ width: `${txRatio}%`, backgroundColor: '#fb923c' }} />
+                                  <div style={{ width: `${rxRatio}%`, backgroundColor: '#4ade80' }} />
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9px', color: '#64748b', marginTop: '4px', fontFamily: 'monospace' }}>
                                   <span>{txRatio.toFixed(0)}% TX</span>
                                   <span>{rxRatio.toFixed(0)}% RX</span>
                                 </div>
                               </td>
-                              {/* Bytes Totales */}
-                              <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 'bold', color: '#f8fafc' }}>
-                                {formatBytes(app.bytes)}
-                              </td>
-                              {/* Porcentaje */}
-                              <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', color: '#a78bfa', fontWeight: 'bold' }}>
-                                {app.percentage ? `${parseFloat(app.percentage).toFixed(1)}%` : '0%'}
-                              </td>
+                              <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 'bold', color: '#f8fafc' }}>{formatBytes(app.bytes)}</td>
+                              <td style={{ padding: '12px 16px', textAlign: 'right', fontFamily: 'monospace', color: '#a78bfa', fontWeight: 'bold' }}>{app.percentage ? `${parseFloat(app.percentage).toFixed(1)}%` : '0%'}</td>
                             </tr>
                           );
                         })
@@ -331,6 +352,27 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
+              </div>
+
+              {/* AUDITORÍA DE TRÁFICO DNS */}
+              <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '24px', marginTop: '8px' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#cbd5e1', textTransform: 'uppercase', margin: '0 0 4px 0', letterSpacing: '0.05em' }}>
+                  Top Dominios Solicitados por DNS
+                </h3>
+                <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 16px 0' }}>Métricas de conexiones salientes y resolución de nombres asignados al host.</p>
+                
+                {loadingDns ? (
+                  <div style={{ color: '#64748b', textAlign: 'center', padding: '40px', fontSize: '13px' }}>
+                    <RefreshCw className="h-5 w-5 animate-spin mx-auto mb-2 text-blue-400" />
+                    Consultando auditoría DNS en tiempo real...
+                  </div>
+                ) : dnsData.length === 0 ? (
+                  <div style={{ color: '#64748b', textAlign: 'center', padding: '40px', fontSize: '13px' }}>
+                    No se encontraron solicitudes de resolución DNS activas para este dispositivo.
+                  </div>
+                ) : (
+                  <EChartsDnsBarWrapper dataList={dnsData} targetIp={selectedHostIp} />
+                )}
               </div>
             </>
           )}
@@ -362,7 +404,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* GRÁFICO GLOBAL DE TOP CONSUMIDORES (CON COUPLING DE EVENTO CLICK) */}
+          {/* GRÁFICO GLOBAL DE TOP CONSUMIDORES */}
           <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '24px' }}>
             <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#cbd5e1', textTransform: 'uppercase', margin: '0 0 8px 0', letterSpacing: '0.05em' }}>
               Distribución de Tráfico: Top 10 Consumidores Globales LAN
@@ -380,6 +422,21 @@ export default function App() {
                 seriesName="Consumo por Dispositivo" 
                 onSelectHost={setSelectedHostIp} 
               />
+            )}
+          </div>
+
+          {/* NUEVO GRÁFICO GLOBAL INTEGRADO: TOP RECEPTORES INTERNOS L7 */}
+          <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '24px' }}>
+            <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#cbd5e1', textTransform: 'uppercase', margin: '0 0 4px 0', letterSpacing: '0.05em' }}>
+              Top 10 Receptores Internos por Volumen de Datos (Últimas 5 horas)
+            </h3>
+            <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 16px 0' }}>Análisis del volumen crítico de carga recibida e impacto en el segmento de red activo.</p>
+            {topReceivers.length === 0 ? (
+              <p style={{ color: '#64748b', fontSize: '13px', textAlign: 'center', padding: '40px 0' }}>
+                Esperando sumario de datagramas capturados en el segmento de red...
+              </p>
+            ) : (
+              <EChartsTopReceiversBarWrapper dataList={topReceivers} />
             )}
           </div>
 
@@ -458,8 +515,205 @@ export default function App() {
   );
 }
 
+// ==========================================================
+// 3. COMPONENTE NUEVO: GRÁFICO DE RECEPTORES INTERNOS (BARRA HORIZONTAL)
+// ==========================================================
+function EChartsTopReceiversBarWrapper({ dataList }) {
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    const myChart = echarts.init(chartRef.current);
+
+    // Ordenar de menor a mayor para colocar los mayores arriba
+    const sortedData = [...dataList].sort((a, b) => a.megabytes_recibidos - b.megabytes_recibidos);
+
+    const ips = sortedData.map(item => item.ip_destino);
+    const megabytes = sortedData.map(item => item.megabytes_recibidos);
+
+    const option = {
+      backgroundColor: 'transparent',
+      textStyle: {
+        fontFamily: 'sans-serif',
+        color: '#94a3b8'
+      },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        backgroundColor: '#0f172a',
+        borderColor: '#334155',
+        borderWidth: 1,
+        textStyle: { color: '#f8fafc' },
+        formatter: function (params) {
+          const tar = params[0];
+          const original = sortedData.find(d => d.ip_destino === tar.name);
+          return `<b>IP Recipiente: ${tar.name}</b><br/>
+                  Volumen: <b>${tar.value.toLocaleString()} MB</b><br/>
+                  Conexiones: <b>${original ? original.conexiones_totales.toLocaleString() : 0}</b>`;
+        }
+      },
+      grid: {
+        left: '2%',
+        right: '8%',
+        bottom: '8%',
+        top: '4%',
+        containLabel: true
+      },
+      xAxis: {
+        type: 'value',
+        name: 'Megabytes (MB)',
+        nameTextStyle: { color: '#64748b', fontSize: 11 },
+        splitLine: { lineStyle: { color: '#334155', type: 'dashed' } },
+        axisLabel: { 
+          color: '#94a3b8', 
+          fontSize: 11,
+          formatter: '{value} MB'
+        }
+      },
+      yAxis: {
+        type: 'category',
+        data: ips,
+        axisLine: { lineStyle: { color: '#334155' } },
+        axisLabel: { color: '#cbd5e1', fontSize: 11 }
+      },
+      series: [
+        {
+          name: 'Datos Recibidos',
+          type: 'bar',
+          data: megabytes,
+          barWidth: '55%',
+          itemStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+              { offset: 0, color: '#a855f7' }, // Púrpura Slate
+              { offset: 1, color: '#ec4899' }  // Rosado de alto impacto
+            ]),
+            borderRadius: [0, 4, 4, 0]
+          },
+          label: {
+            show: true,
+            position: 'right',
+            color: '#f8fafc',
+            fontSize: 10,
+            formatter: (params) => `${params.value.toLocaleString()} MB`
+          }
+        }
+      ]
+    };
+
+    myChart.setOption(option);
+
+    const handleResize = () => {
+      if (myChart) myChart.resize();
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      myChart.dispose();
+    };
+  }, [dataList]);
+
+  return <div ref={chartRef} style={{ width: '100%', height: '340px', position: 'relative', zIndex: 10 }} />;
+}
+
+// ==========================================================
+// 4. COMPONENTE REUTILIZABLE: GRÁFICO DE BARRAS DNS (NATIVO)
+// ==========================================================
+function EChartsDnsBarWrapper({ dataList, targetIp }) {
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    const myChart = echarts.init(chartRef.current);
+    const dominios = (dataList || []).map(item => item.dominio);
+    const conexiones = (dataList || []).map(item => item.conexiones);
+
+    const option = {
+      backgroundColor: 'transparent',
+      textStyle: {
+        fontFamily: 'sans-serif',
+        color: '#94a3b8'
+      },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        backgroundColor: '#0f172a',
+        borderColor: '#334155',
+        borderWidth: 1,
+        textStyle: { color: '#f8fafc' },
+        formatter: function (params) {
+          const tar = params[0];
+          return `<b>${tar.name}</b><br/>Conexiones: <b>${tar.value.toLocaleString()}</b>`;
+        }
+      },
+      grid: {
+        left: '2%',
+        right: '8%',
+        bottom: '8%',
+        top: '6%',
+        containLabel: true
+      },
+      xAxis: {
+        type: 'value',
+        name: 'Peticiones',
+        nameTextStyle: { color: '#64748b', fontSize: 11 },
+        splitLine: { lineStyle: { color: '#334155', type: 'dashed' } },
+        axisLabel: { color: '#94a3b8', fontSize: 11 }
+      },
+      yAxis: {
+        type: 'category',
+        data: dominios,
+        axisLine: { lineStyle: { color: '#334155' } },
+        axisLabel: {
+          color: '#cbd5e1',
+          fontSize: 11,
+          formatter: (value) => value.length > 32 ? `${value.slice(0, 29)}...` : value
+        }
+      },
+      series: [
+        {
+          name: 'Conexiones',
+          type: 'bar',
+          data: conexiones,
+          barWidth: '55%',
+          itemStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+              { offset: 0, color: '#3b82f6' },
+              { offset: 1, color: '#60a5fa' }
+            ]),
+            borderRadius: [0, 4, 4, 0]
+          },
+          label: {
+            show: true,
+            position: 'right',
+            color: '#f8fafc',
+            fontSize: 10,
+            formatter: (params) => params.value.toLocaleString()
+          }
+        }
+      ]
+    };
+
+    myChart.setOption(option);
+
+    const handleResize = () => {
+      if (myChart) myChart.resize();
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      myChart.dispose();
+    };
+  }, [dataList]);
+
+  return <div ref={chartRef} style={{ width: '100%', height: '320px', position: 'relative', zIndex: 10 }} />;
+}
+
 // ==========================================
-// 3. REUTILIZABLE DE APACHE ECHARTS (ADAPTATIVO)
+// 5. REUTILIZABLE DE APACHE ECHARTS (DONA)
 // ==========================================
 function EChartsPieWrapper({ dataList, nameKey = 'name', valueKey = 'bytes', seriesName = 'Consumo', onSelectHost }) {
   const chartRef = useRef(null);
@@ -469,13 +723,11 @@ function EChartsPieWrapper({ dataList, nameKey = 'name', valueKey = 'bytes', ser
 
     const myChart = echarts.init(chartRef.current);
 
-    // Mapeamos los datos inyectando la IP en la estructura interna de ECharts para poder recuperarla en el Click
     const chartData = (dataList || []).map(item => {
       const bytesInGB = parseFloat((item[valueKey] / (1024 * 1024 * 1024)).toFixed(2));
       return {
         name: item[nameKey] || 'Desconocido',
         value: bytesInGB,
-        // Almacenamos la IP de manera segura dentro de las propiedades extendidas del nodo de datos
         hostIp: item.ip || null 
       };
     });
@@ -537,10 +789,8 @@ function EChartsPieWrapper({ dataList, nameKey = 'name', valueKey = 'bytes', ser
 
     myChart.setOption(option);
 
-    // NUEVO EVENTO: Interceptor de Clics sobre los sectores de la dona
     if (onSelectHost) {
       myChart.on('click', function (params) {
-        // Accedemos a la propiedad extendida hostIp de nuestro set original
         if (params.data && params.data.hostIp) {
           onSelectHost(params.data.hostIp);
         }
@@ -554,7 +804,6 @@ function EChartsPieWrapper({ dataList, nameKey = 'name', valueKey = 'bytes', ser
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      // Desvinculamos el evento para evitar fugas de memoria (memory leaks) antes de destruir la instancia
       if (onSelectHost) myChart.off('click');
       myChart.dispose();
     };
@@ -568,7 +817,7 @@ function EChartsPieWrapper({ dataList, nameKey = 'name', valueKey = 'bytes', ser
         height: '280px', 
         position: 'relative', 
         zIndex: 10,
-        cursor: onSelectHost ? 'pointer' : 'default' // Cambia el cursor a "mano" si es clickeable
+        cursor: onSelectHost ? 'pointer' : 'default'
       }} 
     />
   );
