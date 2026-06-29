@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Network, RefreshCw, Search, HardDrive, UserCheck, Activity, ShieldAlert, Laptop, ArrowLeft } from 'lucide-react';
+import { Network, RefreshCw, Search, HardDrive, UserCheck, Activity, ShieldAlert, Laptop, ArrowLeft, Lock, User, LogOut } from 'lucide-react';
 import * as echarts from 'echarts';
 
 // ==========================================
@@ -35,7 +35,6 @@ const api = {
     if (!res.ok) throw new Error("Error en US-003_DNS");
     return res.json();
   },
-  // NUEVO ENDPOINT: Top Receptores Internos
   fetchTopReceivers: async (timeRange = "now-5h") => {
     const res = await fetch(`http://localhost:8000/api/top-receptores?time_range=${timeRange}`, {
       headers: { 'accept': 'application/json' }
@@ -58,11 +57,16 @@ const formatBytes = (bytes) => {
 // 2. COMPONENTE PRINCIPAL UNIFICADO
 // ==========================================
 export default function App() {
+  // Estado de Control de Sesión
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return localStorage.getItem('noc_session_active') === 'true';
+  });
+
   // Estados Globales (Vista B)
   const [hosts, setHosts] = useState([]);
   const [metrics, setMetrics] = useState({});
   const [topConsumers, setTopConsumers] = useState([]);
-  const [topReceivers, setTopReceivers] = useState([]); // Nuevo Estado
+  const [topReceivers, setTopReceivers] = useState([]); 
   const [search, setSearch] = useState("");
   const [loadingList, setLoadingList] = useState(true);
   const [error, setError] = useState(null);
@@ -77,13 +81,30 @@ export default function App() {
   const [dnsData, setDnsData] = useState([]);
   const [loadingDns, setLoadingDns] = useState(false);
 
-  // Polling unificado (Cada 30 segundos)
+  // Manejadores de Sesión
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('noc_session_active');
+    setIsAuthenticated(false);
+    // Resetear estados al salir
+    setSelectedHostIp(null);
+    setHostDetail(null);
+    setHostApps(null);
+    setDnsData([]);
+  };
+
+  // Polling unificado (Cada 30 segundos) - Solo si está autenticado
   useEffect(() => {
+    if (!isAuthenticated) return;
+
     const loadNocData = () => {
       Promise.all([
         api.fetchHosts(4),
         api.fetchTopConsumers(4, 10),
-        api.fetchTopReceivers("now-5h").catch(() => ({ success: false, data: [] })) // Resguardo si el puerto 8000 no responde
+        api.fetchTopReceivers("now-5h").catch(() => ({ success: false, data: [] })) 
       ])
         .then(([hostsData, consumersData, receiversData]) => {
           setHosts(hostsData.hosts || []);
@@ -99,11 +120,11 @@ export default function App() {
     loadNocData();
     const interval = setInterval(loadNocData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAuthenticated]);
 
   // Carga de detalle profundo al inspeccionar un dispositivo
   useEffect(() => {
-    if (!selectedHostIp) return;
+    if (!selectedHostIp || !isAuthenticated) return;
     setLoadingDetail(true);
     
     Promise.all([
@@ -119,10 +140,11 @@ export default function App() {
         setError("No se pudieron solicitar los datagramas L7 de este dispositivo.");
       })
       .finally(() => setLoadingDetail(false));
-  }, [selectedHostIp]);
+  }, [selectedHostIp, isAuthenticated]);
 
   // Efecto independiente para cargar las estadísticas DNS
   useEffect(() => {
+    if (!isAuthenticated) return;
     if (!selectedHostIp) {
       setDnsData([]);
       return;
@@ -147,13 +169,18 @@ export default function App() {
     };
 
     loadDnsData();
-  }, [selectedHostIp]);
+  }, [selectedHostIp, isAuthenticated]);
 
   // Filtrado de la tabla maestra
   const filteredHosts = hosts.filter(host => 
     host.ip?.toLowerCase().includes(search.toLowerCase()) ||
     host.hostname?.toLowerCase().includes(search.toLowerCase())
   );
+
+  // Renderizado Condicional: Vista de Autenticación
+  if (!isAuthenticated) {
+    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', color: '#f8fafc', padding: '24px', fontFamily: 'sans-serif' }}>
@@ -167,9 +194,23 @@ export default function App() {
             <p style={{ fontSize: '14px', color: '#94a3b8', margin: '4px 0 0 0' }}>Monitoreo e Inventario de Flujos de Red</p>
           </div>
         </div>
-        <div style={{ fontSize: '12px', backgroundColor: '#1e293b', padding: '6px 12px', borderRadius: '9999px', color: '#34d399', border: '1px solid #475569' }}>
-          <RefreshCw className="h-3 w-3 animate-spin inline mr-1.5" /> 
-          {selectedHostIp ? `Analizando L7: ${selectedHostIp}` : 'Sincronizado Core LAN (5s)'}
+        
+        {/* Controles del lado derecho del Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ fontSize: '12px', backgroundColor: '#1e293b', padding: '6px 12px', borderRadius: '9999px', color: '#34d399', border: '1px solid #475569' }}>
+            <RefreshCw className="h-3 w-3 animate-spin inline mr-1.5" /> 
+            {selectedHostIp ? `Analizando L7: ${selectedHostIp}` : 'Sincronizado Core LAN (30s)'}
+          </div>
+          
+          {/* Botón de Cierre de Sesión Dinámico */}
+          <button 
+            onClick={handleLogout}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#f87171', padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.2)'}
+            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)'}
+          >
+            <LogOut className="h-3.5 w-3.5" /> Salir
+          </button>
         </div>
       </header>
 
@@ -516,7 +557,107 @@ export default function App() {
 }
 
 // ==========================================================
-// 3. COMPONENTE NUEVO: GRÁFICO DE RECEPTORES INTERNOS (BARRA HORIZONTAL)
+// 3. COMPONENTE VISUAL DE LOGIN (ESTILIZADO CIBERSEGURIDAD)
+// ==========================================================
+function LoginView({ onLoginSuccess }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    
+    // Credenciales de control internas solicitadas
+    if (username === 'admin' && password === 'corralon2026') {
+      localStorage.setItem('noc_session_active', 'true');
+      onLoginSuccess();
+    } else {
+      setError('Acceso denegado: Firma o credenciales de operador inválidas.');
+    }
+  };
+
+  return (
+    <div style={{ backgroundColor: '#0f172a', minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#f8fafc', padding: '16px', fontFamily: 'sans-serif', boxSizing: 'border-box' }}>
+      <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '16px', padding: '32px', width: '100%', maxWidth: '420px', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7)' }}>
+        
+        {/* Isotipo/Logo Superior */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '28px', gap: '10px' }}>
+          <div style={{ backgroundColor: 'rgba(52, 211, 153, 0.1)', border: '1px solid rgba(52, 211, 153, 0.2)', padding: '14px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Network className="h-8 w-8 text-emerald-400 animate-pulse" />
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#f1f5f9', letterSpacing: '0.025em' }}>Autenticación NOC Core</h2>
+            <p style={{ fontSize: '13px', color: '#94a3b8', margin: '4px 0 0 0' }}>Terminal de Flujos — Corralon a b c</p>
+          </div>
+        </div>
+
+        {error && (
+          <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#f87171', padding: '12px', borderRadius: '8px', marginBottom: '20px', fontSize: '13px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+            <ShieldAlert className="h-4 w-4 flex-shrink-0" /> {error}
+          </div>
+        )}
+
+        {/* Formulario */}
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold', letterSpacing: '0.05em' }}>ID Operador / Usuario</label>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <User className="h-4 w-4" style={{ position: 'absolute', left: '14px', color: '#64748b' }} />
+              <input 
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Introduzca identificador..."
+                required
+                style={{ width: '100%', backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', padding: '12px 14px 12px 42px', color: '#f8fafc', outline: 'none', fontSize: '14px', boxSizing: 'border-box', transition: 'border-color 0.2s' }}
+                onFocus={(e) => e.target.style.borderColor = '#34d399'}
+                onBlur={(e) => e.target.style.borderColor = '#334155'}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold', letterSpacing: '0.05em' }}>Clave de Seguridad criptográfica</label>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Lock className="h-4 w-4" style={{ position: 'absolute', left: '14px', color: '#64748b' }} />
+              <input 
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
+                required
+                style={{ width: '100%', backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', padding: '12px 14px 12px 42px', color: '#f8fafc', outline: 'none', fontSize: '14px', boxSizing: 'border-box', transition: 'border-color 0.2s' }}
+                onFocus={(e) => e.target.style.borderColor = '#34d399'}
+                onBlur={(e) => e.target.style.borderColor = '#334155'}
+              />
+            </div>
+          </div>
+
+          <button 
+            type="submit"
+            style={{ width: '100%', backgroundColor: '#10b981', color: '#ffffff', border: 'none', borderRadius: '8px', padding: '12px 16px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '6px', transition: 'background-color 0.2s' }}
+            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#059669'}
+            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#10b981'}
+          >
+            Sincronizar y Entrar
+          </button>
+        </form>
+
+        {/* Sección de ayuda de credenciales */}
+        <div style={{ marginTop: '28px', borderTop: '1px dashed #334155', paddingTop: '16px', textAlign: 'center' }}>
+          <p style={{ fontSize: '11px', color: '#64748b', margin: 0 }}>Credenciales autorizadas de acceso:</p>
+          <code style={{ display: 'inline-block', fontSize: '12px', color: '#cbd5e1', backgroundColor: '#0f172a', padding: '4px 10px', borderRadius: '6px', marginTop: '6px', border: '1px solid rgba(51, 65, 85, 0.4)' }}>
+            admin / corralon2026
+          </code>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// ==========================================================
+// 4. COMPONENTE: GRÁFICO DE RECEPTORES INTERNOS (BARRA HORIZONTAL)
 // ==========================================================
 function EChartsTopReceiversBarWrapper({ dataList }) {
   const chartRef = useRef(null);
@@ -525,8 +666,6 @@ function EChartsTopReceiversBarWrapper({ dataList }) {
     if (!chartRef.current) return;
 
     const myChart = echarts.init(chartRef.current);
-
-    // Ordenar de menor a mayor para colocar los mayores arriba
     const sortedData = [...dataList].sort((a, b) => a.megabytes_recibidos - b.megabytes_recibidos);
 
     const ips = sortedData.map(item => item.ip_destino);
@@ -534,10 +673,7 @@ function EChartsTopReceiversBarWrapper({ dataList }) {
 
     const option = {
       backgroundColor: 'transparent',
-      textStyle: {
-        fontFamily: 'sans-serif',
-        color: '#94a3b8'
-      },
+      textStyle: { fontFamily: 'sans-serif', color: '#94a3b8' },
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -553,23 +689,13 @@ function EChartsTopReceiversBarWrapper({ dataList }) {
                   Conexiones: <b>${original ? original.conexiones_totales.toLocaleString() : 0}</b>`;
         }
       },
-      grid: {
-        left: '2%',
-        right: '8%',
-        bottom: '8%',
-        top: '4%',
-        containLabel: true
-      },
+      grid: { left: '2%', right: '8%', bottom: '8%', top: '4%', containLabel: true },
       xAxis: {
         type: 'value',
         name: 'Megabytes (MB)',
         nameTextStyle: { color: '#64748b', fontSize: 11 },
         splitLine: { lineStyle: { color: '#334155', type: 'dashed' } },
-        axisLabel: { 
-          color: '#94a3b8', 
-          fontSize: 11,
-          formatter: '{value} MB'
-        }
+        axisLabel: { color: '#94a3b8', fontSize: 11, formatter: '{value} MB' }
       },
       yAxis: {
         type: 'category',
@@ -585,8 +711,8 @@ function EChartsTopReceiversBarWrapper({ dataList }) {
           barWidth: '55%',
           itemStyle: {
             color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-              { offset: 0, color: '#a855f7' }, // Púrpura Slate
-              { offset: 1, color: '#ec4899' }  // Rosado de alto impacto
+              { offset: 0, color: '#a855f7' }, 
+              { offset: 1, color: '#ec4899' }  
             ]),
             borderRadius: [0, 4, 4, 0]
           },
@@ -603,9 +729,7 @@ function EChartsTopReceiversBarWrapper({ dataList }) {
 
     myChart.setOption(option);
 
-    const handleResize = () => {
-      if (myChart) myChart.resize();
-    };
+    const handleResize = () => { if (myChart) myChart.resize(); };
     window.addEventListener('resize', handleResize);
 
     return () => {
@@ -618,7 +742,7 @@ function EChartsTopReceiversBarWrapper({ dataList }) {
 }
 
 // ==========================================================
-// 4. COMPONENTE REUTILIZABLE: GRÁFICO DE BARRAS DNS (NATIVO)
+// 5. COMPONENTE REUTILIZABLE: GRÁFICO DE BARRAS DNS (NATIVO)
 // ==========================================================
 function EChartsDnsBarWrapper({ dataList, targetIp }) {
   const chartRef = useRef(null);
@@ -632,10 +756,7 @@ function EChartsDnsBarWrapper({ dataList, targetIp }) {
 
     const option = {
       backgroundColor: 'transparent',
-      textStyle: {
-        fontFamily: 'sans-serif',
-        color: '#94a3b8'
-      },
+      textStyle: { fontFamily: 'sans-serif', color: '#94a3b8' },
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -648,13 +769,7 @@ function EChartsDnsBarWrapper({ dataList, targetIp }) {
           return `<b>${tar.name}</b><br/>Conexiones: <b>${tar.value.toLocaleString()}</b>`;
         }
       },
-      grid: {
-        left: '2%',
-        right: '8%',
-        bottom: '8%',
-        top: '6%',
-        containLabel: true
-      },
+      grid: { left: '2%', right: '8%', bottom: '8%', top: '6%', containLabel: true },
       xAxis: {
         type: 'value',
         name: 'Peticiones',
@@ -698,9 +813,7 @@ function EChartsDnsBarWrapper({ dataList, targetIp }) {
 
     myChart.setOption(option);
 
-    const handleResize = () => {
-      if (myChart) myChart.resize();
-    };
+    const handleResize = () => { if (myChart) myChart.resize(); };
     window.addEventListener('resize', handleResize);
 
     return () => {
@@ -713,7 +826,7 @@ function EChartsDnsBarWrapper({ dataList, targetIp }) {
 }
 
 // ==========================================
-// 5. REUTILIZABLE DE APACHE ECHARTS (DONA)
+// 6. REUTILIZABLE DE APACHE ECHARTS (DONA)
 // ==========================================
 function EChartsPieWrapper({ dataList, nameKey = 'name', valueKey = 'bytes', seriesName = 'Consumo', onSelectHost }) {
   const chartRef = useRef(null);
@@ -734,10 +847,7 @@ function EChartsPieWrapper({ dataList, nameKey = 'name', valueKey = 'bytes', ser
 
     const option = {
       backgroundColor: 'transparent',
-      textStyle: {
-        fontFamily: 'sans-serif',
-        color: '#94a3b8'
-      },
+      textStyle: { fontFamily: 'sans-serif', color: '#94a3b8' },
       tooltip: {
         trigger: 'item',
         backgroundColor: '#0f172a',
@@ -766,10 +876,7 @@ function EChartsPieWrapper({ dataList, nameKey = 'name', valueKey = 'bytes', ser
             borderColor: '#1e293b', 
             borderWidth: 2
           },
-          label: {
-            show: false,
-            position: 'center'
-          },
+          label: { show: false, position: 'center' },
           emphasis: {
             label: {
               show: true,
@@ -779,9 +886,7 @@ function EChartsPieWrapper({ dataList, nameKey = 'name', valueKey = 'bytes', ser
               formatter: '{b}\n{c} GB'
             }
           },
-          labelLine: {
-            show: false
-          },
+          labelLine: { show: false },
           data: chartData
         }
       ]
@@ -797,9 +902,7 @@ function EChartsPieWrapper({ dataList, nameKey = 'name', valueKey = 'bytes', ser
       });
     }
 
-    const handleResize = () => {
-      if (myChart) myChart.resize();
-    };
+    const handleResize = () => { if (myChart) myChart.resize(); };
     window.addEventListener('resize', handleResize);
 
     return () => {
